@@ -7,7 +7,7 @@
 #include <unistd.h>
 #include <termios.h>
 
-/* Left off at: https://viewsourcecode.org/snaptoken/kilo/03.rawInputAndOutput.html#arrow-keys */
+/* Left off at: https://viewsourcecode.org/snaptoken/kilo/04.aTextViewer.html */
 
 #define CTRL_KEY(k) ((k) & 0x1f)
 
@@ -29,6 +29,23 @@
 #define GET_CUR_POS_LEN     sizeof(GET_CUR_POS)-1
 #define HIDE_CUR_LEN        sizeof(HIDE_CUR)-1
 #define SHOW_CUR_LEN        sizeof(SHOW_CUR)-1
+
+enum editor_key {
+    KEY_LEFT  = 1000,
+    KEY_RIGHT,
+    KEY_UP,
+    KEY_DOWN,
+    KEY_HOME,
+    KEY_END,
+    KEY_PG_UP,
+    KEY_PG_DN,
+    KEY_DEL,
+    KEY_INSERT,
+//    KEY_LEFT  = 'h',
+//    KEY_RIGHT = 'l',
+//    KEY_UP    = 'k',
+//    KEY_DOWN  = 'j'
+};
 
 struct editor_config {
     int cx, cy;
@@ -87,7 +104,25 @@ enable_raw()
         die("tcsetattr");
 }
 
-char
+void
+echo_key()
+{
+    int nread;
+    char c;
+    while ((nread = read(STDIN_FILENO, &c, 1)) != 1) {
+        if (nread == -1 && errno != EAGAIN)
+            die("read");
+    }
+    if (CTRL_KEY('q') == c) {
+        exit(0);
+    } else {
+        char buf[10];
+        sprintf(buf, "%d ", c);
+        write(STDOUT_FILENO, buf, strlen(buf));
+    }
+}
+
+int
 editor_read_key()
 {
     int nread;
@@ -98,7 +133,51 @@ editor_read_key()
         if (nread == -1 && errno != EAGAIN)
             die("read");
     }
-    return c;
+
+    if (c == ESC_CHAR) {
+        char seq[3];
+
+        if (read(STDIN_FILENO, &seq[0], 1) != 1)
+            return ESC_CHAR;
+        if (read(STDIN_FILENO, &seq[1], 1) != 1)
+            return ESC_CHAR;
+
+        if (seq[0] == '[') {
+            if (seq[1] >= '0' && seq[1] <= '9') {
+                if (read(STDIN_FILENO, &seq[2], 1) != 1)
+                    return ESC_CHAR;
+                if (seq[2] == '~') {
+                    switch(seq[1]) {
+                        case '1': return KEY_HOME;
+                        case '2': return KEY_INSERT;
+                        case '3': return KEY_DEL;
+                        case '4': return KEY_END;
+                        case '5': return KEY_PG_UP;
+                        case '6': return KEY_PG_DN;
+                        case '7': return KEY_HOME;
+                        case '8': return KEY_END;
+                    }
+                }
+            } else {
+                switch (seq[1]) {
+                    case 'A': return KEY_UP;
+                    case 'B': return KEY_DOWN;
+                    case 'C': return KEY_RIGHT;
+                    case 'D': return KEY_LEFT;
+                    case 'H': return KEY_HOME;
+                    case 'F': return KEY_END;
+                }
+            }
+        } else if (seq[0] == 'O') {
+            switch (seq[1]) {
+                case 'H': return KEY_HOME;
+                case 'F': return KEY_END;
+            }
+        }
+        return ESC_CHAR;
+    } else {
+        return c;
+    }
 }
 
 int
@@ -170,20 +249,24 @@ abFree(struct abuf * ab)
 }
 
 void
-editor_move_cursor(char key)
+editor_move_cursor(int key)
 {
     switch (key) {
-        case 'h':
-            E.cx--;
+        case KEY_LEFT:
+            if (E.cx > 0)
+                E.cx--;
             break;
-        case 'j':
-            E.cy++;
+        case KEY_RIGHT:
+            if (E.cx < E.screencols - 1)
+                E.cx++;
             break;
-        case 'k':
-            E.cy--;
+        case KEY_UP:
+            if (E.cy > 0)
+                E.cy--;
             break;
-        case 'l':
-            E.cx++;
+        case KEY_DOWN:
+            if (E.cy < E.screenrows - 1)
+                E.cy++;
             break;
     }
 }
@@ -191,7 +274,7 @@ editor_move_cursor(char key)
 void
 editor_process_keypress()
 {
-    char c = editor_read_key();
+    int c = editor_read_key();
 
     switch (c) {
         case CTRL_KEY('q'):
@@ -199,10 +282,26 @@ editor_process_keypress()
             write(STDOUT_FILENO, CUR_TOP_LEFT, CUR_TOP_LEFT_LEN);
             exit(0);
             break;
-        case 'h':
-        case 'j':
-        case 'k':
-        case 'l':
+        case KEY_PG_UP:
+        case KEY_PG_DN:
+            {
+                int times = E.screenrows;
+                while (times--)
+                    editor_move_cursor(c == KEY_PG_UP ? KEY_UP : KEY_DOWN);
+            }
+            break;
+        case KEY_HOME:
+            E.cx = 0;
+            break;
+
+        case KEY_END:
+            E.cx = E.screencols - 1;
+            break;
+
+        case KEY_LEFT:
+        case KEY_DOWN:
+        case KEY_UP:
+        case KEY_RIGHT:
             editor_move_cursor(c);
             break;
     }
@@ -268,12 +367,12 @@ init_editor()
 
 int main()
 {
-/*    int n = 0; */
     enable_raw();
     init_editor();
     while (1) {
         editor_refresh_screen();
         editor_process_keypress();
+        //echo_key();
     }
     return 0;
 }

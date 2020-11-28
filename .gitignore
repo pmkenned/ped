@@ -7,4 +7,6 @@
 *.so.*
 *.exe
 *.out
+.*.swp
 build/
+ped

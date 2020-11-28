@@ -4,10 +4,10 @@ CPPFLAGS=
 LDFLAGS=
 LDLIBS=
 
-TARGET=myprog
+TARGET=ped
 BUILD_DIR=./build
 SRC=main.c
-OBJ=$(SRC:%.c=%.o)
+OBJ=$(SRC:%.c=$(BUILD_DIR)/%.o)
 DEP=$(OBJ:%.o=%.d)
 
 .PHONY: all clean
@@ -26,4 +26,4 @@ $(BUILD_DIR)/%.o: %.c
 -include $(DEP)
 
 clean:
-	rm -rf $(BUILD_DIR)
+	rm -rf $(BUILD_DIR) $(TARGET)
