@@ -13,7 +13,7 @@
 #include <stdarg.h>
 #include <termios.h>
 
-/* Left off at: https://viewsourcecode.org/snaptoken/kilo/05.aTextEditor.html#save-as */
+/* Left off at: https://viewsourcecode.org/snaptoken/kilo/06.search.html */
 
 #define TAB_STOP 8
 #define QUIT_TIMES 2
@@ -543,6 +543,30 @@ editor_draw_message_bar(struct abuf * ab)
 }
 
 void
+editor_refresh_screen()
+{
+    char buf[32];
+    struct abuf ab = ABUF_INIT;
+
+    editor_scroll();
+
+    ab_append(&ab, HIDE_CUR, HIDE_CUR_LEN);
+    ab_append(&ab, CUR_TOP_LEFT, CUR_TOP_LEFT_LEN);
+
+    editor_draw_rows(&ab);
+    editor_draw_status_bar(&ab);
+    editor_draw_message_bar(&ab);
+
+    snprintf(buf, sizeof(buf), ESC "[%d;%dH", (E.cy - E.rowoff) + 1, (E.rx - E.coloff) + 1);
+    ab_append(&ab, buf, strlen(buf));
+
+    ab_append(&ab, SHOW_CUR, SHOW_CUR_LEN);
+
+    write(STDOUT_FILENO, ab.b, ab.len);
+    abFree(&ab);
+}
+
+void
 editor_set_status_message(const char * fmt, ...)
 {
     va_list ap;
@@ -550,6 +574,45 @@ editor_set_status_message(const char * fmt, ...)
     vsnprintf(E.statusmsg, sizeof(E.statusmsg), fmt, ap);
     va_end(ap);
     E.statusmsg_time = time(NULL);
+}
+
+char *
+editor_prompt(char * prompt)
+{
+    size_t bufsize = 128;
+    char * buf = malloc(bufsize);
+
+    size_t buflen = 0;
+    buf[0] = '\0';
+
+    while (1) {
+        int c;
+
+        editor_set_status_message(prompt, buf);
+        editor_refresh_screen();
+
+        c = editor_read_key();
+        if (c == KEY_DEL || c == CTRL_KEY('h') || c == KEY_BACKSPACE) {
+            if (buflen != 0)
+                buf[--buflen] = '\0';
+        } else if (c == ESC_CHAR) {
+            editor_set_status_message("");
+            free(buf);
+            return NULL;
+        } else if (c == '\r') {
+            if (buflen != 0) {
+                editor_set_status_message("");
+                return buf;
+            }
+        } else if (!iscntrl(c) && c < 128) {
+            if (buflen == bufsize -1) {
+                bufsize *= 2;
+                buf = realloc(buf, bufsize);
+            }
+            buf[buflen++] = c;
+            buf[buflen] = '\0';
+        }
+    }
 }
 
 void
@@ -655,7 +718,7 @@ editor_open(char * filename)
     free(E.filename);
     E.filename = strdup(filename);
     if (fp == NULL)
-        die("fopen");
+        return;
 
     while ((linelen = getline(&line, &linecap, fp)) != -1) {
         while (linelen > 0 &&
@@ -675,8 +738,13 @@ editor_save()
     int len;
     char * buf;
     int fd;
-    if (E.filename == NULL)
-        return;
+    if (E.filename == NULL) {
+        E.filename = editor_prompt("Save as: %s");
+        if (E.filename == NULL) {
+            editor_set_status_message("Save aborted");
+            return;
+        }
+    }
 
     buf = editor_rows_to_string(&len);
     fd = open(E.filename, O_RDWR | O_CREAT, 0644);
@@ -694,30 +762,6 @@ editor_save()
     }
     free(buf);
     editor_set_status_message("Can't save! I/O error: %s", strerror(errno));
-}
-
-void
-editor_refresh_screen()
-{
-    char buf[32];
-    struct abuf ab = ABUF_INIT;
-
-    editor_scroll();
-
-    ab_append(&ab, HIDE_CUR, HIDE_CUR_LEN);
-    ab_append(&ab, CUR_TOP_LEFT, CUR_TOP_LEFT_LEN);
-
-    editor_draw_rows(&ab);
-    editor_draw_status_bar(&ab);
-    editor_draw_message_bar(&ab);
-
-    snprintf(buf, sizeof(buf), ESC "[%d;%dH", (E.cy - E.rowoff) + 1, (E.rx - E.coloff) + 1);
-    ab_append(&ab, buf, strlen(buf));
-
-    ab_append(&ab, SHOW_CUR, SHOW_CUR_LEN);
-
-    write(STDOUT_FILENO, ab.b, ab.len);
-    abFree(&ab);
 }
 
 void
